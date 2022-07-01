@@ -16,6 +16,15 @@ uint8_t calcsum(uint8_t *arr, int len)
     return sum;
 }
 
+void convertToBytes(long int num, uint8_t *arr, int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        uint8_t b = (num >> ((len - 1) - i) * 8) & 0xFF;
+        arr[i] = b;
+    }
+}
+
 void printhex(uint8_t *b, uint8_t len)
 {
     char hex[] = "0123456789ABCDEF";
@@ -30,7 +39,17 @@ void printhex(uint8_t *b, uint8_t len)
     Serial.println(result);
 }
 
-ECU::ECU() {}
+void simulate_data(ecu_data *data)
+{
+    // set engine speed
+    convertToBytes(random(0, 16383), data->engineSpeed, 2);
+    convertToBytes(random(0, 100), data->throttle, 1);
+    convertToBytes(random(0, 255), data->vehicleSpeed, 1);
+}
+
+ECU::ECU()
+{
+}
 
 void ECU::init(HardwareSerial &serial, uint8_t tx, uint8_t rx)
 {
@@ -41,6 +60,10 @@ void ECU::init(HardwareSerial &serial, uint8_t tx, uint8_t rx)
     this->_prevtime = 0;
     this->_has_initialized = false;
     this->state = SLEEP;
+
+    convertToBytes(0, this->data.engineSpeed, 2);
+    convertToBytes(0, this->data.throttle, 1);
+    convertToBytes(0, this->data.vehicleSpeed, 1);
 }
 
 bool ECU::wakeup()
@@ -118,14 +141,109 @@ after_loop:
     return true;
 }
 
-bool ECU::loop()
+void ECU::loop()
 {
+    size_t bytesRead;
+
+    if (!this->_has_initialized)
+    {
+        return;
+    }
+
+    // change values
+    simulate_data(&this->data);
 
     if (this->_serial->available())
     {
+        bytesRead = this->_serial->readBytes(this->buffer, 6);
+        if (bytesRead == 6)
+        {
+            // handle message
+            uint8_t recvSum = this->buffer[5];
+            uint8_t sum = calcsum(this->buffer, 5);
+            if (recvSum != sum)
+            {
+                // TODO send error message
+                return;
+            }
+
+            // get pid and service
+            uint8_t service = this->buffer[3];
+            uint8_t pid = this->buffer[4];
+
+            if (!this->supportService(service))
+            {
+                // TODO send error message
+                return;
+            }
+
+            if (!this->supportPid(pid))
+            {
+                // TODO send error message
+                return;
+            }
+
+            switch (pid)
+            {
+            case 0x0C: // Engine speed
+                send_reponse(this->data.engineSpeed, 2);
+                break;
+            case 0x0D: // Vehicle speed
+                send_reponse(this->data.vehicleSpeed, 1);
+                break;
+            case 0x11: // Throttle position
+                send_reponse(this->data.throttle, 1);
+                break;
+            default:
+                // if it's a request to get supported pids answer with the correct one
+                if (pid % 32 == 0)
+                {
+
+                    long int supportedList[7] = {
+                        SUPPORTED_PID_01_TO_20,
+                        SUPPORTED_PID_21_TO_40,
+                        SUPPORTED_PID_41_TO_60,
+                        SUPPORTED_PID_61_TO_80,
+                        SUPPORTED_PID_81_TO_A0,
+                        SUPPORTED_PID_A1_TO_C0,
+                        SUPPORTED_PID_C1_TO_E0};
+                    uint8_t idx = pid / 32;
+                    uint8_t data[4] = {0};
+                    convertToBytes(supportedList[idx], data, 4);
+
+                    send_reponse(data, 4);
+                }
+                break;
+            }
+        }
     }
 
-    return false;
+    return;
+}
+
+void ECU::send_reponse(uint8_t *data, int datalen)
+{
+    //   raw request: {0xc2, 0x33, 0xf1, 0x01, 0x0d, 0xf4}
+    //   returns       0x83  0xf1  0x11  0x41  0xd  0x0  0xd3
+
+    //   raw request: {0xc2, 0x33, 0xf1, 0x01, 0x0c, 0xf3}
+    //   returns       0x84, 0xf1, 0x11, 0x41, 0x0c, 0x0c, 0x4c, 0x2b, 0xf3
+    int packetlen = 4 + datalen + 1;
+    uint8_t response[4 + datalen + 1] = {0};
+    response[0] = (0b1 << 7) | datalen; // this is the length
+    response[1] = this->buffer[2];
+    response[2] = 0x11;
+    response[3] = 0x41;
+
+    // set the actual data
+    memcpy(&response[4], data, datalen);
+
+    response[packetlen - 1] = calcsum(response, 8);
+
+    while (!this->_serial->availableForWrite())
+    {
+    }
+    this->_serial->write(response, packetlen);
 }
 
 int ECU::wakeup_state_helper(int *prevtime, int duration, int valtocheck, enum ECU_STATE state_to_go)
@@ -151,6 +269,15 @@ bool ECU::supportService(uint8_t service)
 }
 bool ECU::supportPid(uint8_t pid)
 {
+    long int supportedList[7] = {
+        SUPPORTED_PID_01_TO_20,
+        SUPPORTED_PID_21_TO_40,
+        SUPPORTED_PID_41_TO_60,
+        SUPPORTED_PID_61_TO_80,
+        SUPPORTED_PID_81_TO_A0,
+        SUPPORTED_PID_A1_TO_C0,
+        SUPPORTED_PID_C1_TO_E0};
+
     if (pid % 32 == 0)
         return true;
 
@@ -158,12 +285,7 @@ bool ECU::supportPid(uint8_t pid)
         return false;
 
     uint8_t idx = pid / 32;
-    int num = this->supportedList[idx];
+    long int num = supportedList[idx];
 
     return ((num >> (32 - (pid % 32))) & 0x1) == 1;
-}
-
-void ECU::writeInterval()
-{
-    this->_serial->write("hello from ECU");
 }
