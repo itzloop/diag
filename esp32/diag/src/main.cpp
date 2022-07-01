@@ -5,6 +5,7 @@
 #include <IPAddress.h>
 #include "secrets.h"
 #include "constants.h"
+#include "obd.h"
 
 const char *topicTX = "topic/test/rx";
 const char *topicRX = "topic/test/tx";
@@ -105,6 +106,8 @@ TaskHandle_t t1, t2;
 unsigned long prev = 0, duration = 1000;
 bool connected = false;
 
+OBD2 diag;
+
 void setup()
 {
   // put your setup code here, to run once:
@@ -112,6 +115,7 @@ void setup()
   delay(1000);
 
   Serial.println("program starting...");
+  diag.init(Serial2, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
 
   // ecu.init(Serial2, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
   // xTaskCreate(readECU, "read", 10000, NULL, tskIDLE_PRIORITY, &t1);
