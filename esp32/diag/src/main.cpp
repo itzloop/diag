@@ -7,8 +7,8 @@
 #include "constants.h"
 #include "obd.h"
 
-const char *topicTX = "topic/test/rx";
-const char *topicRX = "topic/test/tx";
+const char *topicTX = "topic/test/tx";
+const char *topicRX = "topic/test/rx";
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASS;
 
@@ -89,16 +89,6 @@ void messaging(void *params)
   for (;;)
   {
     client.loop();
-    if (millis() - prev > duration)
-    {
-
-      if (!client.connected())
-        setup_mqtt_client();
-      else
-        client.publish(topicTX, "Hello World");
-
-      prev = millis();
-    }
   }
 }
 
@@ -118,7 +108,7 @@ void setup()
   diag.init(Serial2, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
 
   // ecu.init(Serial2, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
-  // xTaskCreate(readECU, "read", 10000, NULL, tskIDLE_PRIORITY, &t1);
+  xTaskCreatePinnedToCore(messaging, "messaging", 10000, NULL, 1, &t1, 1);
   // xTaskCreate(wakeupECU, "wakeupECU", 10000, NULL, 0, &t2);
   // Serial2.end();
 
@@ -132,34 +122,55 @@ void setup()
 
   // pinMode(LED_BUILTIN, OUTPUT);
 
-  // setup_wifi(ssid, password);
-  // client.setServer(MQTT_URL, MQTT_PORT)
-  //     .setCallback(callback)
-  //     .setBufferSize(4096);
-  // setup_mqtt_client();
+  setup_wifi(ssid, password);
+  client.setServer(MQTT_URL, MQTT_PORT)
+      .setCallback(callback)
+      .setBufferSize(4096);
+  setup_mqtt_client();
 }
 
+char format[] = "{\"engine\":%s,\"vehicle\":%s,\"throttle\":%s}";
+char buf[4096];
 void loop()
 {
 
-  if (!connected)
-  {
-    // send init message
+  // if (!connected)
+  // {
+  //   // send init message
 
-    if (Serial2.availableForWrite())
-    {
-      uint8_t message[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
-      Serial2.write(message, 5);
-      // for (uint8_t i = 0; i < len; i++)
-      // {
-      //   Serial2.write(message,);
-      // }
-    }
+  //   if (Serial2.availableForWrite())
+  //   {
+  //     uint8_t message[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
+  //     Serial2.write(message, 5);
+  //     // for (uint8_t i = 0; i < len; i++)
+  //     // {
+  //     //   Serial2.write(message,);
+  //     // }
+  //   }
 
-    // int len = 5;
-  }
+  //   // int len = 5;
+  // }
 
-  delay(1000);
+  // get engine speed
+  Serial.println("engine speed: ");
+  diag.getPid(0x0C, 0x01);
+  String a = diag.humanReadable(0x0C, 0x01);
+
+  // get vehicle speed
+  Serial.println("vehicle speed: ");
+  diag.getPid(0x0D, 0x01);
+  String b = diag.humanReadable(0x0D, 0x01);
+
+  // get throttle
+  Serial.println("get throttle: ");
+  diag.getPid(0x11, 0x01);
+  String c = diag.humanReadable(0x11, 0x01);
+
+  sprintf(buf, format, a, b, c);
+  Serial.println(buf);
+
+  client.publish(topicTX, buf);
+  delay(3000);
 
   // if (Serial2.available() > 0)
   // {

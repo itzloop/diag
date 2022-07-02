@@ -21,4 +21,5 @@ private:
 public:
     void getPid(uint8_t pid, uint8_t mode);
     bool init(HardwareSerial &serial, uint8_t rx, uint8_t stx);
+    String humanReadable(uint8_t pid, uint8_t mode);
 };

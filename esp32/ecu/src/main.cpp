@@ -9,15 +9,26 @@ ECU ecu;
 void setup()
 {
   // put your setup code here, to run once:
-  Serial.begin(10400);
-  Serial.println("program starting");
-  Serial.end();
+  // Serial.begin(10400);
+  // Serial.println("program starting");
+  // Serial.end();
 
   ecu.init(Serial, RXPIN, TXPIN);
-  ecu.wakeup();
 }
 
 void loop()
 {
+
+  if (!ecu.initialized())
+  {
+    if (!ecu.wakeup())
+    {
+      Serial.begin(10400);
+      Serial.println("fuck");
+      Serial.end();
+    }
+    return;
+  }
+
   ecu.loop();
 }

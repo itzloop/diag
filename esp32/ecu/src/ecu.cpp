@@ -43,8 +43,11 @@ void simulate_data(ecu_data *data)
 {
     // set engine speed
     convertToBytes(random(0, 16383), data->engineSpeed, 2);
+    // convertToBytes(420, data->engineSpeed, 2);
     convertToBytes(random(0, 100), data->throttle, 1);
+    // convertToBytes(85, data->throttle, 1);
     convertToBytes(random(0, 255), data->vehicleSpeed, 1);
+    // convertToBytes(69, data->vehicleSpeed, 1);
 }
 
 ECU::ECU()
@@ -101,44 +104,51 @@ bool ECU::wakeup()
 after_loop:
     // Serial.printf("prevtime: %d, state: %d, val: %d\n", prev, this->state, val);
     this->_serial->begin(10400);
-    this->_serial->println("reached here...");
+    // this->_serial->println("reached here...");
     // handle init message
     // we need the received message to be {0xC1, 0x33, 0xF1, 0x81, 0x66};
     // DebugPrintln("reading 5 bytes...");
-    delay(1000);
+    // delay(1000);
 
-    while (Serial.available())
+    while (!this->_serial->available())
     {
-        uint8_t message[5] = {};
-        this->_serial->readBytes(message, 5);
-
-        printhex(message, 5);
-
-        DebugPrintln("received init message...");
-        DebugPrintln("calculating checksum");
-        DebugPrintln(calcsum(message, 4));
-        // calc checksum
-        if (calcsum(message, 4) != 0x66)
-        {
-            DebugPrintln("failed to verify checksum");
-            uint8_t failure_message[] = {0x83, 0xf1, 0x01, 0x7f, 0xe9, 0x8f};
-            this->_serial->write(failure_message, 6);
-            this->state = SLEEP;
-            return false;
-        }
-
-        DebugPrintln("checksum verification was successful");
-
-        uint8_t success_message[] = {0x83, 0xf1, 0x01, 0xc1, 0xe9, 0x8f};
-        this->_serial->write(success_message, 6);
-        DebugPrintln("sent success message");
-
-        this->state = IDLE;
-
-        DebugPrintln("begin receiving requests...");
     }
 
+    uint8_t message[5] = {};
+    this->_serial->readBytes(message, 5);
+
+    // printhex(message, 5);
+
+    // DebugPrintln("received init message...");
+    // DebugPrintln("calculating checksum");
+    // DebugPrintln(calcsum(message, 4));
+    // calc checksum
+    if (calcsum(message, 4) != 0x66)
+    {
+        // DebugPrintln("failed to verify checksum");
+        uint8_t failure_message[] = {0x83, 0xf1, 0x01, 0x7f, 0xe9, 0x8f};
+        this->_serial->write(failure_message, 6);
+        this->state = SLEEP;
+        return false;
+    }
+
+    // DebugPrintln("checksum verification was successful");
+
+    uint8_t success_message[] = {0x83, 0xf1, 0x01, 0xc1, 0xe9, 0x8f};
+    this->_serial->write(success_message, 6);
+    // DebugPrintln("sent success message");
+
+    this->state = IDLE;
+
+    // DebugPrintln("begin receiving requests...");
+
+    this->_has_initialized = true;
     return true;
+}
+
+bool ECU::initialized()
+{
+    return this->_has_initialized;
 }
 
 void ECU::loop()
@@ -221,14 +231,14 @@ void ECU::loop()
     return;
 }
 
-void ECU::send_reponse(uint8_t *data, int datalen)
+void ECU::send_reponse(uint8_t *data, int datalen) // 0x55 1
 {
     //   raw request: {0xc2, 0x33, 0xf1, 0x01, 0x0d, 0xf4}
     //   returns       0x83  0xf1  0x11  0x41  0xd  0x0  0xd3
 
     //   raw request: {0xc2, 0x33, 0xf1, 0x01, 0x0c, 0xf3}
     //   returns       0x84, 0xf1, 0x11, 0x41, 0x0c, 0x0c, 0x4c, 0x2b, 0xf3
-    int packetlen = 4 + datalen + 1;
+    int packetlen = 4 + datalen + 1; // 6
     uint8_t response[4 + datalen + 1] = {0};
     response[0] = (0b1 << 7) | datalen; // this is the length
     response[1] = this->buffer[2];

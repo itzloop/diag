@@ -70,4 +70,5 @@ public:
     void init(HardwareSerial &serial, uint8_t tx, uint8_t rx);
     bool wakeup();
     void loop();
+    bool initialized();
 };
