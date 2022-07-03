@@ -253,9 +253,9 @@ after_loop:
     // printhex(message, 5);
 
     DebugPrintln("received init message...");
-    printhex(message, 5);
+    // printhex(message, 5);
     DebugPrintln("calculating checksum");
-    DebugPrintln(calcsum(message, 4));
+    // DebugPrintln(calcsum(message, 4));
     // calc checksum
     if (calcsum(message, 4) != 0x66)
     {
@@ -391,11 +391,11 @@ void ECU::send_reponse(uint8_t *data, int datalen) // 0x55 1
 
     // set the actual data
     memcpy(&response[4], data, datalen);
-    Serial.printf("responsing with %d bytes\n", packetlen);
+    // Serial.printf("responsing with %d bytes\n", packetlen);
     uint8_t sum = calcsum(response, packetlen);
-    Serial.printf("calculated checksum %d\n", sum);
+    // Serial.printf("calculated checksum %d\n", sum);
     response[packetlen - 1] = sum;
-    printhex(response, packetlen);
+    // printhex(response, packetlen);
 
     while (!this->_serial->availableForWrite())
     {
