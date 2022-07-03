@@ -30,27 +30,32 @@ uint8_t calcsum(uint8_t *arr, int len)
     return sum;
 }
 
-bool OBD2::init(HardwareSerial &serial, uint8_t rx, uint8_t tx)
+bool OBD2::init(HardwareSerial &serial, uint8_t tx, uint8_t rx)
 {
     this->_serial = &serial;
     this->rx = rx;
     this->tx = tx;
 
+#ifdef ECU_WAKEUP_INIT
+
     this->_serial->end();
     pinMode(this->tx, OUTPUT);
-    digitalWrite(this->tx, HIGH);
 
-    digitalWrite(this->tx, 1);
+    Serial.println("sending high for 3 seconds");
+    digitalWrite(this->tx, LOW);
     delay(3000);
-    digitalWrite(this->tx, 0);
+    Serial.println("sending low for 25 ms");
+    digitalWrite(this->tx, HIGH);
     delay(25);
-    digitalWrite(this->tx, 1);
+    digitalWrite(this->tx, LOW);
+    Serial.println("sending high for 25 ms");
     delay(25);
-
-    Serial2.begin(10400);
+    return false;
+#endif
+    this->_serial->begin(10400);
 
     // send init message to ecu
-    Serial.println("send init message to ecu");
+    Serial.println("sending init message to ecu...");
     uint8_t message[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
     this->_serial->write(message, 5);
 
@@ -63,9 +68,7 @@ bool OBD2::init(HardwareSerial &serial, uint8_t rx, uint8_t tx)
     }
     bytes_read = this->_serial->readBytes(response, 6);
 
-    Serial.println("read 6 bytes:");
-    printhex(response, 6);
-    Serial.println(bytes_read);
+    Serial.println("got init response:");
 
     if (response[3] == 0xC1)
     {
@@ -104,26 +107,17 @@ void OBD2::getPid(uint8_t pid, uint8_t mode)
     {
     }
 
-    // Serial.println("writing 5 bytes");
-    // printhex(request, 6);
     this->_serial->write(request, 6);
-    // Serial.println("wrote 6 bytes waiting for response");
     while (!this->_serial->available())
     {
     }
 
-    // Serial.println("got the response");
-
-    // uint8_t reponse[retlen] = {0};
     // calculate the length
     uint8_t d1;
     this->_serial->readBytes(&d1, 1);
     uint8_t responselen = d1 & 0b111111;
-
-    // Serial.printf("first byte: %d, converted to len: %d\n", d1, responselen);
     uint8_t response[4 + responselen + 1] = {0}; // 6
     response[0] = d1;
-    // F1114155FB28
     uint8_t readbytes = this->_serial->readBytes(&response[1], 3 + responselen + 1);
     if (readbytes != 3 + responselen + 1)
     {
@@ -132,19 +126,15 @@ void OBD2::getPid(uint8_t pid, uint8_t mode)
         return;
     }
 
-    memset(this->buffer, 0, BUFFER_SIZE);
     uint8_t sum = calcsum(response, 4 + responselen);
 
-    // if (sum != response[4 + responselen])
-    // {
-    //     Serial.println("error sum != response[responselen - 1]");
-    //     return;
-    // }
-    // 81F1114155FB28
-    // memset(this->buffer, 0, BUFFER_SIZE);
-    // printhex(response, 4 + responselen + 1);
+    if (sum != response[4 + responselen])
+    {
+        Serial.printf("error sum(%d) != response[4 + responselen](%d)\n", sum, response[4 + responselen]);
+        return;
+    }
+    memset(this->buffer, 0, BUFFER_SIZE);
     memcpy(this->buffer, &response[4], responselen);
-    // printhex(this->buffer, BUFFER_SIZE);
 }
 
 String OBD2::humanReadable(uint8_t pid, uint8_t mode)

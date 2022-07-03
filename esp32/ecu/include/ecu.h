@@ -14,6 +14,8 @@
 
 #define INTERNAL_BUFFER_SIZE 16
 
+// #define ECU_WAKEUP_INIT
+
 struct ecu_data
 {
     // 0 to 16,383
@@ -54,16 +56,21 @@ private:
 
     uint8_t buffer[INTERNAL_BUFFER_SIZE];
 
-    int _prevtime;
+    unsigned long _prevtime;
+    unsigned long _last_message_time;
     bool _has_initialized;
     enum ECU_STATE state;
 
     struct ecu_data data;
 
-    int wakeup_state_helper(int *, int, int, enum ECU_STATE);
+    static ECU *instance;
+
+    int wakeup_state_helper(unsigned long *, unsigned long, int, enum ECU_STATE);
     bool supportService(uint8_t service);
     bool supportPid(uint8_t pid);
     void send_reponse(uint8_t *data, int datalen);
+    static void handle_int();
+    void handleInterrupt();
 
 public:
     ECU();

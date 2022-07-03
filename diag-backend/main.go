@@ -1,44 +1,177 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"html/template"
+	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strconv"
+	"sync"
 	"syscall"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/joho/godotenv"
 )
 
+type ECUData struct {
+	EngineSpeed   float64 `json:"engine,omitempty"`
+	VehicleSpeed  int     `json:"vehicle,omitempty"`
+	ThrottleSpeed float64 `json:"throttle,omitempty"`
+}
+
+type WrappedList struct {
+	max   int
+	index int
+	list  []ECUData
+}
+
+func NewWrappedList(max int) *WrappedList {
+	return &WrappedList{
+		max:   max,
+		index: -1,
+		list:  make([]ECUData, max),
+	}
+}
+
+func (l *WrappedList) Add(data ECUData) {
+	l.index++
+	l.index %= l.max
+	l.list[l.index] = data
+}
+
+func (l *WrappedList) Get() []ECUData {
+	result := make([]ECUData, l.max)
+	copy(result, l.list)
+	return result
+}
+
+func (l *WrappedList) GetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprintf(w, "method %s is not supported.", r.Method)
+		return
+	}
+
+	err := tmpl.Execute(w, struct {
+		List []ECUData
+	}{
+		List: l.Get(),
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "unexpected error %v", err)
+		return
+	}
+}
+
 var (
-	id       = ""
-	username = ""
-	password = ""
+	id         = ""
+	username   = ""
+	password   = ""
+	broker     = ""
+	port       = 0
+	topicRX    = ""
+	httpAddr   = ""
+	assetsPath = ""
+	tmpl       *template.Template
+
+	mqttClient     mqtt.Client
+	mqttClientOnce sync.Once
+
+	wrappedList     *WrappedList
+	wrappedListOnce sync.Once
 )
 
 func OnMessage(client mqtt.Client, msg mqtt.Message) {
-	fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
+	// fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
+	switch msg.Topic() {
+	case topicRX:
+		var data ECUData
+		err := json.Unmarshal(msg.Payload(), &data)
+		if err != nil {
+			log.Println(err)
+		}
+
+		wrappedList.Add(data)
+	}
+
 }
 
 func OnConnect(client mqtt.Client) {
-	fmt.Println("Connected")
+	log.Println("Connected")
 }
 
 func OnClose(client mqtt.Client, err error) {
-	fmt.Printf("Connect lost: %v", err)
+	log.Printf("Connect lost: %v", err)
 }
 
 func main() {
 
+	log.SetOutput(os.Stdout)
 	godotenv.Load()
 	id = os.Getenv("MQTT_ID")
 	username = os.Getenv("MQTT_USER")
 	password = os.Getenv("MQTT_PASS")
+	broker = os.Getenv("MQTT_BROKER")
+	topicRX = os.Getenv("MQTT_DIAG_TOPIC")
+	httpAddr = os.Getenv("HTTP_ADDRESS")
 
-	broker := "itsloop.dev"
-	port := 8883
+	p, err := strconv.ParseInt(os.Getenv("MQTT_PORT"), 10, 64)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	port = int(p)
 
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	assetsPath := path.Join(wd, "assets")
+
+	tmpl = template.Must(template.ParseFiles(path.Join(assetsPath, "index.gohtml")))
+
+	// create mqtt and http clients
+	createMqttClient()
+	go createHTTPServer(httpAddr)
+
+	// topicTX := "topic/test/rx"
+	token := mqttClient.Subscribe(topicRX, 1, nil)
+	token.Wait()
+	fmt.Printf("Subscribed to topic %s", topicRX)
+
+	ch := make(chan os.Signal)
+	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+
+	<-ch
+}
+
+func createMqttClient() {
+	mqttClientOnce.Do(func() {
+		mqttClient = mqtt.NewClient(createMQTTOpts(broker, port))
+	})
+
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
+		log.Fatalln(token.Error())
+	}
+}
+
+func createHTTPServer(addr string) {
+	wrappedListOnce.Do(func() {
+		wrappedList = NewWrappedList(100)
+	})
+
+	http.HandleFunc("/diag", wrappedList.GetHandler)
+
+	log.Printf("http server listening on %s...", addr)
+	log.Fatalln(http.ListenAndServe(addr, nil))
+}
+
+func createMQTTOpts(broker string, port int) *mqtt.ClientOptions {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", broker, port))
 	opts.SetClientID(id)
@@ -47,40 +180,5 @@ func main() {
 	opts.SetDefaultPublishHandler(OnMessage)
 	opts.OnConnect = OnConnect
 	opts.OnConnectionLost = OnClose
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		panic(token.Error())
-	}
-
-	topicRX := "topic/test/rx"
-	topicTX := "topic/test/tx"
-
-	// for i := 0; i < 10; i++ {
-	// 	token := client.Publish(topic, 0, false, "Damn Son")
-	// 	token.Wait()
-	// 	fmt.Println("Published")
-
-	// }
-
-	token := client.Subscribe(topicRX, 1, nil)
-	token.Wait()
-	fmt.Printf("Subscribed to topic %s", topicRX)
-
-	// token = client.Subscribe(topicTX, 1, nil)
-	// token.Wait()
-	// fmt.Printf("Subscribed to topic %s", topicTX)
-
-	go func() {
-		timer := time.Tick(time.Second)
-		for range timer {
-			token := client.Publish(topicTX, 1, false, "Hi from server")
-			token.Wait()
-			fmt.Println("published to ", topicTX)
-		}
-	}()
-
-	ch := make(chan os.Signal)
-	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
-
-	<-ch
+	return opts
 }
