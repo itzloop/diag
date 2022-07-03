@@ -80,15 +80,17 @@ h2 small {
 </style>
 <body>
     <div class="container">
-        <h2>Diag data</h2>
+        <h2>Diag data <small>Last Update: {{.LastUpdate}}</small></h2>
         <ul class="responsive-table">
           <li class="table-header">
+            <div class="col col-1">Time</div>
             <div class="col col-1">Engine Speed</div>
             <div class="col col-2">Vehicle Speed</div>
             <div class="col col-3">Throttle</div>
           </li>
           {{range .List}}
             <li class="table-row">
+              <div class="col col-1" data-label="Job Id">{{.Time}}</div>
               <div class="col col-1" data-label="Job Id">{{.EngineSpeed}}</div>
               <div class="col col-2" data-label="Customer Name">{{.VehicleSpeed}}</div>
               <div class="col col-3" data-label="Amount">{{.ThrottleSpeed}}</div>

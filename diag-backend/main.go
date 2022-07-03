@@ -12,12 +12,35 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/joho/godotenv"
+	"github.com/mavihq/persian"
+	ptime "github.com/yaa110/go-persian-calendar"
+)
+
+var (
+	id         = ""
+	username   = ""
+	password   = ""
+	broker     = ""
+	port       = 0
+	topicRX    = ""
+	httpAddr   = ""
+	assetsPath = ""
+	lastUpdate ptime.Time
+	tmpl       *template.Template
+
+	mqttClient     mqtt.Client
+	mqttClientOnce sync.Once
+
+	wrappedList     *WrappedList
+	wrappedListOnce sync.Once
 )
 
 type ECUData struct {
+	Time          string  `json:"time,omitempty"`
 	EngineSpeed   float64 `json:"engine,omitempty"`
 	VehicleSpeed  int     `json:"vehicle,omitempty"`
 	ThrottleSpeed float64 `json:"throttle,omitempty"`
@@ -33,18 +56,23 @@ func NewWrappedList(max int) *WrappedList {
 	return &WrappedList{
 		max:   max,
 		index: -1,
-		list:  make([]ECUData, max),
+		list:  []ECUData{},
 	}
 }
 
 func (l *WrappedList) Add(data ECUData) {
+	if len(l.list) < l.max {
+		l.list = append(l.list, data)
+		return
+	}
+
 	l.index++
 	l.index %= l.max
 	l.list[l.index] = data
 }
 
 func (l *WrappedList) Get() []ECUData {
-	result := make([]ECUData, l.max)
+	result := make([]ECUData, len(l.list))
 	copy(result, l.list)
 	return result
 }
@@ -57,9 +85,11 @@ func (l *WrappedList) GetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := tmpl.Execute(w, struct {
-		List []ECUData
+		List       []ECUData
+		LastUpdate string
 	}{
-		List: l.Get(),
+		List:       l.Get(),
+		LastUpdate: persian.ToPersianDigits(lastUpdate.Format("hh:mm:ss a")),
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -68,33 +98,18 @@ func (l *WrappedList) GetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var (
-	id         = ""
-	username   = ""
-	password   = ""
-	broker     = ""
-	port       = 0
-	topicRX    = ""
-	httpAddr   = ""
-	assetsPath = ""
-	tmpl       *template.Template
-
-	mqttClient     mqtt.Client
-	mqttClientOnce sync.Once
-
-	wrappedList     *WrappedList
-	wrappedListOnce sync.Once
-)
-
 func OnMessage(client mqtt.Client, msg mqtt.Message) {
 	// fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
 	switch msg.Topic() {
 	case topicRX:
+		lastUpdate = ptime.New(time.Now().In(ptime.Iran()))
 		var data ECUData
 		err := json.Unmarshal(msg.Payload(), &data)
 		if err != nil {
 			log.Println(err)
 		}
+
+		data.Time = lastUpdate.Format("HH:mm:ss")
 
 		wrappedList.Add(data)
 	}
